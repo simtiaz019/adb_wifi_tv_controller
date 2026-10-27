@@ -1,5 +1,5 @@
 [Unit]
-Description=Multi-TV Telegram monitor and remote
+Description=TV Hub monitoring and Telegram control
 Wants=network-online.target
 After=network-online.target
 
@@ -8,9 +8,9 @@ Type=simple
 User=root
 Environment=HOME=/root
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=/etc/haier-tv-monitor.env
-ExecStart=/usr/bin/python3 /opt/haier-tv-monitor/haier_tv_bot.py
-WorkingDirectory=/opt/haier-tv-monitor
+EnvironmentFile=/etc/tv-hub.env
+ExecStart=/usr/bin/python3 /opt/tv-hub/tv_controller.py
+WorkingDirectory=/opt/tv-hub
 Restart=on-failure
 RestartSec=10
 UMask=0077

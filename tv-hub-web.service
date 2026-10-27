@@ -1,0 +1,22 @@
+[Unit]
+Description=TV Hub LAN remote
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=HOME=/root
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/tv-hub.env
+ExecStart=/usr/bin/python3 /opt/tv-hub/tv_web.py
+WorkingDirectory=/opt/tv-hub
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

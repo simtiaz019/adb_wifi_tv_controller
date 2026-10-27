@@ -5,10 +5,10 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from haier_tv_bot import ADB, App, Config, Store, Telegram, TelegramError, TV, observe
+from tv_controller import ADB, App, Config, Store, Telegram, TelegramError, TV, observe
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV = dict(TELEGRAM_BOT_TOKEN='123:' + 'x' * 30, TELEGRAM_CHAT_ID='123',
+ENV = dict(TELEGRAM_REMOTE_ENABLED='1', TELEGRAM_BOT_TOKEN='123:' + 'x' * 30, TELEGRAM_CHAT_ID='123',
            TV_NAME='Living Room TV', TV_IP='192.168.1.250', TV_ADB_PORTS='40123,5555',
            TV2_NAME='Mi Box 3', TV2_IP='192.168.1.149', TV2_ADB_PORTS='5555')
 
@@ -169,6 +169,17 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.store.data['selected_tv'], 'second')
         self.assertEqual(self.app.store.data['outbox'][-1]['text'], 'Mi Box 3 — controls')
 
+    def test_additional_device_telegram_and_monitoring(self):
+        config = Config.load(dict(ENV, TV3_NAME='Bedroom', TV3_IP='192.168.1.150', TV3_ADB_PORTS='5555'))
+        app = App(config, self.app.store, self.adb, self.telegram)
+        app.picker()
+        self.assertEqual(app.store.data['outbox'][-1]['keyboard']['inline_keyboard'][-1][0]['callback_data'], 'select:tv3')
+        app.handle(self.msg('/on tv3'))
+        self.assertEqual(self.adb.connect.call_args.args[0].ip, '192.168.1.150')
+        app.monitor(config.tvs[-1]); app.monitor(config.tvs[-1])
+        self.assertEqual(app.store.data['tvs']['tv3']['confirmed'], 'ON')
+        self.assertEqual(app.store.data['tvs']['main'].get('confirmed'), None)
+
     def test_authorization_callbacks(self):
         m = self.msg('/on')['message']
         callback = {'callback_query': {'id': 'a', 'from': {'id': 123}, 'message': m, 'data': 'tv:second:on'}}
@@ -267,6 +278,36 @@ class AppTests(unittest.TestCase):
 
 
 class ConfigADBTests(unittest.TestCase):
+    def test_any_number_of_devices_and_partial_config(self):
+        env = dict(ENV, TV3_NAME='Bedroom', TV3_IP='192.168.1.150', TV3_ADB_PORTS='5555',
+                   TV10_NAME='Office', TV10_IP='192.168.1.151', TV10_ADB_PORTS='40000,5555')
+        config = Config.load(env)
+        self.assertEqual([tv.id for tv in config.tvs], ['main', 'second', 'tv3', 'tv10'])
+        self.assertEqual(config.tvs[-1].name, 'Office')
+        for bad in (dict(ENV, TV3_NAME='Incomplete'), dict(ENV, TV1_NAME='Invalid'),
+                    dict(ENV, TV03_NAME='Invalid')):
+            with self.assertRaises(ValueError):
+                Config.load(bad)
+
+    def test_legacy_installer_migration_is_repeatable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old_config = root / 'etc/haier-tv-monitor.env'
+            old_config.parent.mkdir(parents=True)
+            original = 'TV_ADB_PORTS=49999,5555\nTELEGRAM_BOT_TOKEN=private-value\n'
+            old_config.write_text(original)
+            old_state = root / 'var/lib/haier-tv-monitor/state.json'
+            old_state.parent.mkdir(parents=True)
+            old_state.write_text('{"tv":"ON","offset":77}')
+            for _ in range(2):
+                subprocess.run(['bash', str(ROOT / 'install.sh'), '--root', temp], check=True, capture_output=True)
+            self.assertEqual((root / 'etc/tv-hub.env').read_text(), original)
+            self.assertEqual(old_config.read_text(), original)
+            self.assertEqual((root / 'var/lib/tv-hub/state.json').read_text(), old_state.read_text())
+            (root / 'var/lib/tv-hub/state.json').write_text('{"offset":88}')
+            subprocess.run(['bash', str(ROOT / 'install.sh'), '--root', temp], check=True, capture_output=True)
+            self.assertEqual((root / 'var/lib/tv-hub/state.json').read_text(), '{"offset":88}')
+
     def test_invalid_config(self):
         for key, value in [('TV_IP', 'bad'), ('TV_ADB_PORTS', '0'), ('TV_ADB_PORTS', '65536'),
                            ('TV_ADB_PORTS', '5555,'), ('POLL_SECONDS', 'nan'), ('POLL_SECONDS', '4'),
@@ -307,11 +348,14 @@ class ConfigADBTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             subprocess.run(['bash', str(ROOT / 'install.sh'), '--root', temp], check=True, capture_output=True)
-            config = root / 'etc/haier-tv-monitor.env'
+            config = root / 'etc/tv-hub.env'
             self.assertEqual(config.read_text().count('TELEGRAM_BOT_TOKEN='), 1)
             self.assertIn('TV2_IP=192.168.1.149', config.read_text())
+            self.assertTrue((root / 'opt/tv-hub/tv_web.py').exists())
+            self.assertTrue((root / 'opt/tv-hub/web/app.js').exists())
+            self.assertTrue((root / 'etc/systemd/system/tv-hub-web.service').exists())
             config.write_text('TV_ADB_PORTS=12345\nSECRET=keep\n')
-            state = root / 'var/lib/haier-tv-monitor/state.json'
+            state = root / 'var/lib/tv-hub/state.json'
             state.write_text('{"tv":"OFF","offset":123}')
             subprocess.run(['bash', str(ROOT / 'install.sh'), '--root', temp], check=True, capture_output=True)
             self.assertEqual(config.read_text(), 'TV_ADB_PORTS=12345\nSECRET=keep\n')

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>TV Hub</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><main>
+<header><div class="brand">⌁ <span>TV HUB</span></div><span class="pill">Local network</span></header>
+<section id="picker"><p class="eyebrow">MAKE YOURSELF AT HOME</p><h1>What are we watching?</h1><p class="subtitle">Choose a screen. Your remote is right here.</p><div id="devices" class="devices"></div><p class="footnote">Device availability is checked when you select it.</p></section>
+<section id="remote" hidden><button id="switch" class="text-button">← Switch device</button><div class="remote-heading"><div><p class="eyebrow">YOUR REMOTE</p><h1 id="device-name"></h1></div><span id="power-state" class="pill"></span></div>
+<div class="remote-body"><div class="row"><button data-action="on">◉ <span>Wake</span></button><button data-action="off">☾ <span>Sleep</span></button></div>
+<div class="dpad"><button class="up" data-action="navup" aria-label="Up">↑</button><button class="left" data-action="left" aria-label="Left">←</button><button class="ok" data-action="ok">OK</button><button class="right" data-action="right" aria-label="Right">→</button><button class="down" data-action="navdown" aria-label="Down">↓</button></div>
+<div class="row"><button data-action="back">↶ <span>Back</span></button><button data-action="home">⌂ <span>Home</span></button><button data-action="playpause">▷ Ⅱ <span>Play / pause</span></button></div>
+<div class="divider"></div><p class="eyebrow volume-label">VOLUME</p><div class="row volume"><button data-action="voldown" aria-label="Volume down">−</button><button data-action="mute">Mute</button><button data-action="volup" aria-label="Volume up">+</button></div><button data-action="status" class="text-button refresh">↻ Refresh status</button></div></section>
+<p id="feedback" role="status" aria-live="polite">Connecting to TV Hub…</p>
+<footer>Control stays at home. <span>Alerts travel with you on Telegram.</span></footer>
+</main></body></html>

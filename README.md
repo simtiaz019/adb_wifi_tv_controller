@@ -1,8 +1,8 @@
-# Telegram TV monitor and remote
+# TV Hub — LAN and Telegram remote
 
-A Python standard-library service for a Raspberry Pi that monitors and controls two Android TVs over ADB using one Telegram bot. The repository was extracted from `haier_tv_codex_ready.zip` and implements the brief in `CODEX_PROMPT.md`.
+Two Python standard-library services for a Raspberry Pi: a fast local web remote for any configured Android TV or box and a background monitor that sends status notifications to Telegram. The repository was extracted from `haier_tv_codex_ready.zip` and implements the brief in `CODEX_PROMPT.md`.
 
-The example configuration includes:
+The example configuration includes your two current devices:
 
 | ID | Display name | Address | Connection ports |
 | --- | --- | --- | --- |
@@ -13,38 +13,78 @@ Addresses and names are configuration only. Port 36683 was observed previously a
 
 ## Install or upgrade on the Raspberry Pi
 
-Requires Debian/Raspberry Pi OS, Python 3.9+, systemd, internet access and a trusted LAN. Copy this repository to the Pi, then run from its directory:
+Requires Debian/Raspberry Pi OS, Python 3.9+, systemd, ADB, and a trusted LAN. No Node.js, npm, or Python packages are needed on the Pi. Copy the **updated repository** to the Pi; the original ZIP is still the old package.
+
+From the updated repository directory:
 
 ```bash
-# On upgrades, make private backups first:
-sudo install -d -m 700 /root/haier-tv-backup
-sudo cp -a /etc/haier-tv-monitor.env /root/haier-tv-backup/  # if installed
-sudo systemctl stop haier-tv-monitor                      # if installed
-sudo cp -a /var/lib/haier-tv-monitor/state.json /root/haier-tv-backup/  # if present
+# Upgrading directly from the original installed Haier package:
+sudo systemctl stop haier-tv-monitor
+sudo install -d -m 700 /root/tv-hub-backup
+sudo cp -a /etc/haier-tv-monitor.env /root/tv-hub-backup/
+sudo cp -a /var/lib/haier-tv-monitor/state.json /root/tv-hub-backup/
 
 sudo bash install.sh
-sudo nano /etc/haier-tv-monitor.env
-sudo chmod 600 /etc/haier-tv-monitor.env
-sudo systemctl restart haier-tv-monitor
-sudo systemctl status haier-tv-monitor --no-pager
-sudo journalctl -u haier-tv-monitor -n 50 --no-pager
+sudo nano /etc/tv-hub.env
+sudo chmod 600 /etc/tv-hub.env
+sudo systemctl restart tv-hub-monitor tv-hub-web
+sudo systemctl status tv-hub-monitor tv-hub-web --no-pager
+hostname -I
 ```
 
-Fresh installs create a configuration template and wait for credentials to be entered. Upgrades preserve the environment file byte-for-byte and preserve state; they restart the service. Existing non-root service ownership is rejected before installation to avoid silently switching ADB identities. The installer never appends settings or replaces configured ports.
+You do not need to install any intermediate version. For a fresh installation skip the stop/backup commands. For later TV Hub upgrades, back up `/etc/tv-hub.env` and the active `STATE_FILE`, and stop `tv-hub-monitor` instead. The installer creates a config template and waits for credentials to be entered. On the first migration, the installer copies `/etc/haier-tv-monitor.env` byte-for-byte to `/etc/tv-hub.env` and preserves the original. Existing TV Hub configuration is never overwritten. It stops and disables the old Haier units so there is only one Telegram poller, and starts the generic `tv-hub-monitor` and `tv-hub-web` services. The installer installs/enables both services and restarts them if credentials are configured. Existing non-root service ownership is rejected to avoid silently changing ADB identities.
 
-For an existing installation, add the following keys **once**, editing existing entries if already present:
+Migration retains an explicit `STATE_FILE` exactly as configured, even if it still points into `/var/lib/haier-tv-monitor`. The legacy default state is also copied to `/var/lib/tv-hub/state.json` when the destination does not exist, so configurations without an explicit path keep their history. Old source, configuration, pairing keys and state are retained. Do not restart the retired Haier service alongside TV Hub.
+
+To move an explicitly configured legacy state path to the generic location, stop `tv-hub-monitor`, copy the **current active** state file to `/var/lib/tv-hub/state.json` with mode 600, update `STATE_FILE`, and restart. This is optional; keeping the legacy path is safe. Never replace live state with an older backup.
+
+Edit existing configuration entries, avoiding duplicates:
 
 ```ini
+# Keep your existing private Telegram credentials.
+TV_NAME="Haier MatrixTV CE"
+TV_IP=192.168.1.243
+TV_ADB_PORTS=36683,5555
 TV2_NAME="Mi Box 3"
 TV2_IP=192.168.1.149
 TV2_ADB_PORTS=5555
+POLL_SECONDS=15
+# Fresh-install default; on upgrade keep your existing active STATE_FILE.
+STATE_FILE=/var/lib/tv-hub/state.json
+WEB_HOST=0.0.0.0
+WEB_PORT=8080
+TELEGRAM_REMOTE_ENABLED=1
 ```
 
-Check that `TV_NAME`, `TV_IP`, and `TV_ADB_PORTS` also exist: old installations may have relied on hard-coded defaults. Use `config.env.example` as the reference, keeping your existing ports and credentials. Restart after changes. Remove all `TV2_` keys to disable the second TV.
+Keep the Haier's currently working connection ports; 36683 is only the previously observed port. Start a private conversation with your Telegram bot via `/start` once so it can send notifications. Telegram controls and notifications remain enabled alongside the LAN remote.
 
-Configuration is loaded from the process environment; systemd reads `/etc/haier-tv-monitor.env`. Running Python directly does not read that file automatically. Names, valid literal IP addresses and comma-separated ports (1–65535) are required for each configured TV. `POLL_SECONDS` defaults to 15 and must be at least 5; `STATE_FILE` defaults to `/var/lib/haier-tv-monitor/state.json` and must be absolute. The bot token must have Telegram token syntax and the chat ID must be a positive private-chat ID. Validation cannot verify credentials remotely.
+Open **`http://<Pi-LAN-IP>:8080`** on your phone while connected to your home Wi-Fi. Use the Pi address printed by `hostname -I`, not either TV's address. `http://adguard-home.local:8080` may also work if hostname discovery is available. Bookmark the page or add it to your phone's home screen.
 
-Set the credentials locally, never in Git. Start a private conversation with the bot via `/start` before using it.
+Pick a device to check it is online, then use its remote. Offline devices return you to the picker. The page shows measured request time after each command. The first connection can take longer while ADB discovers a usable endpoint; subsequent button presses go directly to the cached endpoint. An unreachable device may still take up to the ADB timeout to fail. No fixed latency is promised before hardware testing.
+
+The web remote uses a separate process, so Telegram internet timeouts and monitoring checks do not hold up button presses. Per-device locks reject overlapping commands instead of building a delayed queue. Failed key events are never automatically replayed because they may already have taken effect. Reselect a device after a failed command. The two services share the system ADB server and root pairing keys; TV/network/ADB server performance can still affect latency.
+
+The server uses plain HTTP on port 8080 and has no login: anyone on the trusted LAN who can reach that port can control the TVs. Do not port-forward it or expose it to guest/public networks. Bind `WEB_HOST` to the Pi's reserved LAN IPv4 address to restrict its listening interface, and use your firewall to limit access as appropriate. If port 8080 is occupied, change `WEB_PORT`. Host checking supports private IPs, localhost, and the Pi's system hostname/`.local` name. Reverse proxies and custom DNS names are not configured.
+
+The defaults above also apply if the new web/Telegram-mode settings are absent on upgrade. Telegram controls and notifications stay enabled; the LAN web remote is an additional option. No intermediate version is required.
+
+Configuration is loaded from the process environment; systemd reads `/etc/tv-hub.env`. Running Python directly does not read that file automatically. Names, valid literal IP addresses and comma-separated ports (1–65535) are required for each configured TV. `POLL_SECONDS` defaults to 15 and must be at least 5; `STATE_FILE` defaults to `/var/lib/tv-hub/state.json` and must be absolute. Remove all `TV2_` entries to disable the second device. The web service shares the configuration loader and therefore also requires valid Telegram credential syntax, but never makes Telegram requests or returns those credentials to the browser.
+
+## Add more TVs or Android boxes
+
+The app, installation paths and services are named **TV Hub**. Haier and Mi Box are just device display names. Add a numbered group to `/etc/tv-hub.env`, then restart both services:
+
+```ini
+TV3_NAME="Bedroom TV"
+TV3_IP=192.168.1.150
+TV3_ADB_PORTS=5555
+```
+
+```bash
+sudo systemctl restart tv-hub-monitor tv-hub-web
+```
+
+Use `TV4_*`, `TV5_*`, and so on for future devices; gaps are allowed. Each group needs NAME, IP and ADB_PORTS. New devices automatically appear in the web and Telegram pickers and receive independent status monitoring. The original IDs `main` (`TV_*`) and `second` (`TV2_*`) are preserved for state and existing buttons. Additional command IDs are `tv3`, `tv4`, etc.; for example `/status tv3`. Keep numbering stable when editing names/IPs, because monitoring state is keyed by that ID. Remove the entire group to stop monitoring a device. Monitoring is sequential, so more unreachable devices can increase notification latency; web command handling remains independent.
 
 ## ADB setup and verification
 
@@ -66,13 +106,15 @@ To run secret-free diagnostics with systemd loading the environment file:
 
 ```bash
 sudo systemd-run --wait --pipe --collect \
-  -p EnvironmentFile=/etc/haier-tv-monitor.env -p Environment=HOME=/root \
-  /usr/bin/python3 /opt/haier-tv-monitor/haier_tv_bot.py --diagnose
+  -p EnvironmentFile=/etc/tv-hub.env -p Environment=HOME=/root \
+  /usr/bin/python3 /opt/tv-hub/tv_controller.py --diagnose
 ```
 
 Diagnostics contact ADB, but do not contact Telegram or write monitoring state.
 
-## Telegram commands
+## Telegram controls
+
+Telegram controls are enabled by default (`TELEGRAM_REMOTE_ENABLED=1`). The LAN web remote is an additional option for faster control at home.
 
 Send `/home` (or `/menu` or `/start`) to choose **Haier MatrixTV CE** or **Mi Box 3**. Tap a device to check its live ADB connectivity. If it responds, its remote controls appear. If it is unreachable, the bot says the device is not online and returns to the device picker, clearing the previous selection. A reachable device in standby can still show its remote, allowing Wake. The panel includes **Switch TV** to return to the picker. Selecting a device sends no ADB key event.
 
@@ -97,7 +139,7 @@ Success means ADB accepted the key event, not that the physical screen or volume
 
 ## Automatic status notifications
 
-Both configured devices are monitored all the time, regardless of which remote you select. You receive named alerts for ON, OFF/standby, confirmed UNKNOWN power state, loss of connectivity, and reconnection. The first observed baseline is silent; repeated identical readings do not generate repeated alerts.
+All configured devices are monitored all the time, regardless of which remote you select. You receive named alerts for ON, OFF/standby, confirmed UNKNOWN power state, loss of connectivity, and reconnection. The first observed baseline is silent; repeated identical readings do not generate repeated alerts.
 
 Power states require two matching polls; loss of connectivity requires three failed polls after a previous successful connection. These confirmations filter transient errors. With the default 15-second interval, detection takes multiple polls plus ADB/network processing time. A power cut or Wi-Fi failure is reported as **unreachable**, because ADB cannot distinguish those causes.
 
@@ -105,7 +147,7 @@ The Pi must remain powered to monitor, and must have internet access to send Tel
 
 ## Architecture and delivery behavior
 
-One process owns both TVs and is the only Telegram `getUpdates` consumer. Each cycle checks due TVs, polls commands and attempts one queued outgoing message. Individual ADB calls time out after six seconds and Telegram calls after ten seconds. Checks are sequential: an unreachable TV can delay the other TV and remote commands by multiple ADB timeouts. `POLL_SECONDS` is a minimum spacing after each completed TV observation, not a strict real-time guarantee.
+The monitoring process owns persistent state for all configured devices and is the only writer to that file. Each cycle checks due TVs and attempts one queued outgoing message. It also polls Telegram commands by default. The independent threaded web service holds per-device ADB connections and never reads or writes monitoring state. Individual ADB calls time out after six seconds and Telegram calls after ten seconds. Checks are sequential: an unreachable TV can delay monitoring of the other TV and Telegram commands by multiple ADB timeouts. It does not block the separate web service. `POLL_SECONDS` is a minimum spacing after each completed TV observation, not a strict real-time guarantee.
 
 Each TV has independent confirmed power, candidate reading, consecutive count, connectivity and incident state:
 
@@ -120,6 +162,7 @@ The update offset is saved with the queued command response after executing the 
 
 ## Troubleshooting
 
+- **Web page unavailable:** check `sudo systemctl status tv-hub-web` and `sudo journalctl -u tv-hub-web -n 50 --no-pager`. Verify the phone is on the same LAN, the Pi address/port are correct, and Wi-Fi client isolation/firewall rules allow access.
 - **Unauthorized/offline:** unlock the TV, approve the RSA prompt or re-pair with the root identity; confirm `sudo -H adb devices -l`. The controller verifies shell access before selecting an endpoint.
 - **Rotating ports:** read the current wireless-debugging connection port or inspect mDNS, then edit the relevant port list and restart.
 - **Telegram unavailable/conflicts:** verify token and owner chat ID privately; ensure internet/DNS works, disable any webhook via Telegram's `deleteWebhook` method and stop all other `getUpdates` clients. The controller does not delete webhooks or discard pending updates automatically. It backs off polling failures up to 60 seconds and never logs request URLs or API exception bodies.
@@ -131,13 +174,15 @@ The update offset is saved with the queued command response after executing the 
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q haier_tv_bot.py tests
+python3 -m compileall -q tv_controller.py tv_web.py tests
 bash -n install.sh uninstall.sh
+# Optional development-only UI checks (requires Node.js on your dev machine):
+node --test tests/web_ui.test.cjs
 # Optional staging inspection; no apt/systemd operations:
 bash install.sh --root /tmp/tv-monitor-stage
 ```
 
-Tests mock ADB and Telegram and verify state transitions, reconnects, restart migration, authorization, discovery, retries, redaction and installer preservation. They make no live Telegram calls. Hardware authorization, standby ADB availability and Raspberry Pi systemd deployment require on-device validation.
+Tests exercise the real local HTTP server with mocked ADB, plus mocked Telegram, and verify command routing, connection reuse, cross-site request rejection, device isolation, notification-only mode, and state transitions, reconnects, restart migration, authorization, discovery, retries, redaction and installer preservation. They make no live Telegram calls. Hardware authorization, standby ADB availability and Raspberry Pi systemd deployment require on-device validation.
 
 ```bash
 sudo bash uninstall.sh --keep-data  # explicitly retain state and secrets
@@ -145,4 +190,4 @@ sudo bash uninstall.sh --keep-data  # explicitly retain state and secrets
 sudo bash uninstall.sh --purge
 ```
 
-ADB packages and shared root pairing keys are retained in both cases. A custom `STATE_FILE` outside the default directory must be managed separately. See `SECURITY.md` for the root-service tradeoff.
+ADB packages and shared root pairing keys are retained in both cases. Legacy Haier files and a custom or migrated `STATE_FILE` outside the default directory are retained even with `--purge` and must be managed separately. See `SECURITY.md` for the root-service tradeoff.

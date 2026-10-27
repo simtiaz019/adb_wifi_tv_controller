@@ -52,6 +52,7 @@ class Config:
     interval: float
     state_file: Path
     tvs: list
+    telegram_remote: bool = True
 
     @classmethod
     def load(cls, env=None):
@@ -74,9 +75,17 @@ class Config:
         except ValueError:
             raise ValueError('POLL_SECONDS must be a finite number >= 5') from None
         tvs = []
-        for id_, prefix in [('main', 'TV_'), ('second', 'TV2_')]:
-            if id_ == 'second' and not any(k.startswith(prefix) for k in env):
-                continue
+        numbers = set()
+        for key in env:
+            match = re.fullmatch(r'TV([0-9]+)_(NAME|IP|ADB_PORTS)', key)
+            if match:
+                number = int(match.group(1))
+                if number < 2 or str(number) != match.group(1):
+                    raise ValueError('Use TV_ for the first device and TV2_, TV3_, ... for additional devices')
+                numbers.add(number)
+        devices = [('main', 'TV_')] + [
+            ('second' if n == 2 else f'tv{n}', f'TV{n}_') for n in sorted(numbers)]
+        for id_, prefix in devices:
             name = required(prefix + 'NAME')
             try:
                 ip = str(ipaddress.ip_address(required(prefix + 'IP')))
@@ -89,10 +98,13 @@ class Config:
             except ValueError:
                 raise ValueError(prefix + 'ADB_PORTS must contain connection ports 1–65535') from None
             tvs.append(TV(id_, name, ip, ports))
-        state_file = Path(env.get('STATE_FILE', '/var/lib/haier-tv-monitor/state.json'))
+        state_file = Path(env.get('STATE_FILE', '/var/lib/tv-hub/state.json'))
         if not state_file.is_absolute():
             raise ValueError('STATE_FILE must be absolute')
-        return cls(token, chat, interval, state_file, tvs)
+        remote = env.get('TELEGRAM_REMOTE_ENABLED', '1')
+        if remote not in ('0', '1'):
+            raise ValueError('TELEGRAM_REMOTE_ENABLED must be 0 or 1')
+        return cls(token, chat, interval, state_file, tvs, remote == '1')
 
 
 class Store:
@@ -345,7 +357,7 @@ class App:
         action = {'start': 'menu', 'up': 'volup', 'down': 'voldown',
                   'volumeup': 'volup', 'volumedown': 'voldown'}.get(action, action)
         if action not in ACTIONS or tv_id not in self.tvs:
-            self.store.enqueue('Use /menu, or /status main and /status second to choose a TV.')
+            self.store.enqueue('Use /home to choose a device, or /status <device-id>.')
             return
         if action == 'menu':
             self.show_remote(self.tvs[tv_id])
@@ -363,6 +375,8 @@ class App:
         self.store.save()  # Alert and transition committed together.
 
     def poll(self):
+        if not self.config.telegram_remote:
+            return
         if time.time() < self.next_poll:
             return
         try:

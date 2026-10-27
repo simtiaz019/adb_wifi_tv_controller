@@ -2,6 +2,14 @@
 
 ## 2026-10-27
 
+- Renamed the app to TV Hub, with `tv_controller.py`, `tv-hub-monitor`/`tv-hub-web` services and generic installation paths.
+- Added direct migration from the original Haier package, preserving configuration, state and ADB keys while retiring legacy pollers.
+- Added numbered device groups (`TV3_*`, `TV4_*`, …) that automatically populate both remotes and independent monitoring.
+
+- Added a mobile-friendly LAN web remote on port 8080 with device selection, live availability checks, direct cached ADB commands, and response-time feedback.
+- Separated web control into its own systemd service while retaining Telegram controls and notifications by default. Both control interfaces remain available.
+- Added HTTP validation, cross-site request protection, per-device command locks, and installer/uninstaller support for both services.
+
 - Added alerts for confirmed UNKNOWN power-state transitions and verified independent outage/recovery alerts for both devices without selecting a remote. Documented shared power/internet outage limits.
 
 - Check live ADB connectivity before opening a selected device remote; unreachable devices show an offline message and return to the picker with selection cleared.
