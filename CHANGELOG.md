@@ -2,6 +2,8 @@
 
 ## 2026-10-27
 
+- Reworked the mobile web remote into one viewport-sized screen with a top device dropdown, persistent controls, and compact landscape layout. Device changes still verify connectivity; offline controls stay disabled.
+
 - Renamed the app to TV Hub, with `tv_controller.py`, `tv-hub-monitor`/`tv-hub-web` services and generic installation paths.
 - Added direct migration from the original Haier package, preserving configuration, state and ADB keys while retiring legacy pollers.
 - Added numbered device groups (`TV3_*`, `TV4_*`, …) that automatically populate both remotes and independent monitoring.
