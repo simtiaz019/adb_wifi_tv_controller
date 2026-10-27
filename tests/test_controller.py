@@ -36,6 +36,21 @@ class MonitorTests(unittest.TestCase):
             self.assertEqual(observe(s, recovery, 'N'), ['N connection restored.'])
             self.assertEqual(len(observe(s, recovery, 'N')), int(recovery == 'OFF'))
 
+    def test_every_confirmed_power_change(self):
+        state = {}
+        for reading in ('ON', 'ON'):
+            self.assertEqual(observe(state, reading, 'Mi Box 3'), [])
+        for reading, expected in [('UNKNOWN', 'power state is UNKNOWN'),
+                                  ('OFF', 'entered standby'), ('ON', 'turned ON')]:
+            self.assertEqual(observe(state, reading, 'Mi Box 3'), [])
+            alerts = observe(state, reading, 'Mi Box 3')
+            self.assertEqual(len(alerts), 1)
+            self.assertIn(expected, alerts[0])
+            self.assertEqual(observe(state, reading, 'Mi Box 3'), [])
+        self.assertEqual(observe(state, 'UNKNOWN', 'Mi Box 3'), [])
+        self.assertEqual(observe(state, 'ON', 'Mi Box 3'), [])
+        self.assertEqual(observe(state, 'ON', 'Mi Box 3'), [])
+
     def test_unknown_and_intermittent(self):
         s = {}
         for _ in range(4):
@@ -117,7 +132,8 @@ class AppTests(unittest.TestCase):
         buttons = [b for row in panel['keyboard']['inline_keyboard'] for b in row]
         self.assertTrue(all(b['callback_data'].startswith('tv:second:') or
                             b['callback_data'] == 'choose_tv' for b in buttons))
-        self.adb.connect.assert_not_called()
+        self.adb.connect.assert_called_once_with(self.config.tvs[1])
+        self.adb.run.assert_not_called()
         self.app.store.save()
         self.app = App(self.config, Store(self.path), self.adb, self.telegram)
         self.app.handle(self.msg('/volup'))
@@ -129,6 +145,29 @@ class AppTests(unittest.TestCase):
         click('select:main')
         self.app.handle(self.msg('/off'))
         self.assertEqual(self.adb.connect.call_args.args[0].id, 'main')
+
+    def test_offline_selection_returns_home_and_clears_selection(self):
+        self.app.store.data['selected_tv'] = 'main'
+        self.adb.connect.return_value = None
+        update = {'update_id': 9, 'callback_query': {'id': 'offline', 'from': {'id': 123},
+                  'message': self.msg('')['message'], 'data': 'select:second'}}
+        self.telegram.request.return_value = [update]
+        self.app.poll()
+        item = self.app.store.data['outbox'][-1]
+        self.assertIn('Mi Box 3 is not online', item['text'])
+        self.assertIn('Choose a TV:', item['text'])
+        self.assertEqual([row[0]['callback_data'] for row in item['keyboard']['inline_keyboard']],
+                         ['select:main', 'select:second'])
+        self.assertNotIn('selected_tv', Store(self.path).data)
+        self.adb.run.assert_not_called()
+        self.app.handle(self.msg('/on'))
+        self.assertEqual(self.app.store.data['outbox'][-1]['text'], 'Choose a TV:')
+        self.app.handle(self.msg('/menu second'))
+        self.assertIn('Mi Box 3 is not online', self.app.store.data['outbox'][-1]['text'])
+        self.adb.connect.return_value = '192.168.1.149:5555'
+        self.app.handle(update)
+        self.assertEqual(self.app.store.data['selected_tv'], 'second')
+        self.assertEqual(self.app.store.data['outbox'][-1]['text'], 'Mi Box 3 — controls')
 
     def test_authorization_callbacks(self):
         m = self.msg('/on')['message']
@@ -184,6 +223,35 @@ class AppTests(unittest.TestCase):
         self.app.store.data['outbox'][0]['attempts'] = 12
         self.app.flush()
         self.telegram.request.assert_not_called()
+
+    def test_both_devices_alert_without_remote_selection(self):
+        for tv in self.config.tvs:
+            self.app.monitor(tv)
+            self.app.monitor(tv)
+        self.assertEqual(self.app.store.data['outbox'], [])
+        self.adb.connect.return_value = None
+        for _ in range(4):
+            for tv in self.config.tvs:
+                self.app.monitor(tv)
+        messages = [item['text'] for item in Store(self.path).data['outbox']]
+        self.assertEqual(len(messages), 2)
+        for tv in self.config.tvs:
+            self.assertTrue(any(tv.name + ' unreachable' in msg for msg in messages))
+        restarted = App(self.config, Store(self.path), self.adb, self.telegram)
+        for tv in self.config.tvs:
+            restarted.monitor(tv)
+        self.assertEqual(len(restarted.store.data['outbox']), 2)
+        self.adb.connect.return_value = 'connected'
+        self.adb.power.return_value = 'UNKNOWN'
+        for _ in range(3):
+            for tv in self.config.tvs:
+                restarted.monitor(tv)
+        self.assertEqual(len(Store(self.path).data['outbox']), 6)
+        again = App(self.config, Store(self.path), self.adb, self.telegram)
+        for _ in range(2):
+            for tv in self.config.tvs:
+                again.monitor(tv)
+        self.assertEqual(len(again.store.data['outbox']), 6)
 
     def test_invalid_state_schema(self):
         for data in ({'tvs': {'main': []}}, {'outbox': [{}]}, {'offset': -1}):

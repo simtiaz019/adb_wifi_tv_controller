@@ -108,7 +108,7 @@ class Store:
                 if not isinstance(self.data.get('tvs', {}), dict) or not isinstance(self.data.get('outbox', []), list):
                     raise ValueError
                 for state in self.data.get('tvs', {}).values():
-                    if not isinstance(state, dict) or state.get('confirmed') not in (None, 'ON', 'OFF'):
+                    if not isinstance(state, dict) or state.get('confirmed') not in (None, 'ON', 'OFF', 'UNKNOWN'):
                         raise ValueError
                 for item in self.data.get('outbox', []):
                     if not isinstance(item, dict) or not isinstance(item.get('text'), str):
@@ -173,16 +173,15 @@ def observe(state, reading, name):
         alerts.append(f'{name} connection restored.')
     state['connected'], state['unreachable'] = True, False
     state['status'] = reading
-    if reading == 'UNKNOWN':
-        state['candidate'], state['count'] = None, 0
-        return alerts
     state['count'] = state.get('count', 0) + 1 if state.get('candidate') == reading else 1
     state['candidate'] = reading
     if state['count'] >= 2 and state.get('confirmed') != reading:
         old = state.get('confirmed')
         state['confirmed'] = reading
-        if old in ('ON', 'OFF'):
-            alerts.append(f'{name} turned ON.' if reading == 'ON' else f'{name} entered standby (OFF).')
+        if old in ('ON', 'OFF', 'UNKNOWN'):
+            descriptions = {'ON': 'turned ON.', 'OFF': 'entered standby (OFF).',
+                            'UNKNOWN': 'power state is UNKNOWN (ADB is online).'}
+            alerts.append(f'{name} {descriptions[reading]}')
     return alerts
 
 
@@ -272,8 +271,9 @@ class App:
         for state in store.data['tvs'].values():
             state.update(candidate=None, count=0, failures=0)
 
-    def picker(self):
-        self.store.enqueue('Choose a TV:', {'inline_keyboard': [
+    def picker(self, notice=None):
+        text = f'{notice}\n\nChoose a TV:' if notice else 'Choose a TV:'
+        self.store.enqueue(text, {'inline_keyboard': [
             [{'text': tv.name, 'callback_data': f'select:{tv.id}'}]
             for tv in self.tvs.values()]})
 
@@ -283,9 +283,16 @@ class App:
         rows.append([{'text': 'Switch TV', 'callback_data': 'choose_tv'}])
         return {'inline_keyboard': rows}
 
+    def show_remote(self, tv):
+        if not self.adb.connect(tv):
+            self.store.data.pop('selected_tv', None)
+            self.picker(f'{tv.name} is not online (ADB unreachable).')
+            return
+        self.store.data['selected_tv'] = tv.id
+        self.store.enqueue(f'{tv.name} — controls', self.keyboard(tv))
+
     def command(self, tv, action):
-        if action == 'menu':
-            return f'{tv.name} — controls', self.keyboard(tv)
+
         addr = self.adb.connect(tv)
         if not addr:
             return f'{tv.name}: ADB unreachable (power, Wi-Fi or debugging). Wake-up requires a working connection.', None
@@ -315,9 +322,7 @@ class App:
                 if tv_id not in self.tvs:
                     self.picker()
                     return
-                self.store.data['selected_tv'] = tv_id
-                text, keyboard = self.command(self.tvs[tv_id], 'menu')
-                self.store.enqueue(text, keyboard)
+                self.show_remote(self.tvs[tv_id])
                 return
             if data.startswith('tv:') and data.count(':') == 1:
                 tv_id, action = 'main', data[3:]  # Buttons sent by the legacy version.
@@ -341,6 +346,9 @@ class App:
                   'volumeup': 'volup', 'volumedown': 'voldown'}.get(action, action)
         if action not in ACTIONS or tv_id not in self.tvs:
             self.store.enqueue('Use /menu, or /status main and /status second to choose a TV.')
+            return
+        if action == 'menu':
+            self.show_remote(self.tvs[tv_id])
             return
         text, keyboard = self.command(self.tvs[tv_id], action)
         self.store.enqueue(text, keyboard)

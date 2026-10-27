@@ -74,7 +74,7 @@ Diagnostics contact ADB, but do not contact Telegram or write monitoring state.
 
 ## Telegram commands
 
-Send `/home` (or `/menu` or `/start`) to choose **Haier MatrixTV CE** or **Mi Box 3**. Tap a device to see only its remote controls. The panel includes **Switch TV** to return to the picker. Selecting a device sends no ADB key event.
+Send `/home` (or `/menu` or `/start`) to choose **Haier MatrixTV CE** or **Mi Box 3**. Tap a device to check its live ADB connectivity. If it responds, its remote controls appear. If it is unreachable, the bot says the device is not online and returns to the device picker, clearing the previous selection. A reachable device in standby can still show its remote, allowing Wake. The panel includes **Switch TV** to return to the picker. Selecting a device sends no ADB key event.
 
 The selected device is remembered across restarts. Commands such as `/status`, `/on`, `/off`, `/volup`, `/voldown`, and `/mute` use that selection; before a device is selected they show the picker without executing the command. Explicit selectors such as `/status second` still work. `/home` always opens the picker; the panel's **Home** button sends Android Home to that panel's device, and `/home second` remains an explicit shortcut. Buttons carry their device ID, so an older panel still controls the device named in its heading.
 
@@ -95,6 +95,14 @@ For example, `/home second` and `/ok second` operate the Mi Box 3. The inline me
 
 Success means ADB accepted the key event, not that the physical screen or volume was independently verified. Wake-up cannot work through an unreachable ADB connection.
 
+## Automatic status notifications
+
+Both configured devices are monitored all the time, regardless of which remote you select. You receive named alerts for ON, OFF/standby, confirmed UNKNOWN power state, loss of connectivity, and reconnection. The first observed baseline is silent; repeated identical readings do not generate repeated alerts.
+
+Power states require two matching polls; loss of connectivity requires three failed polls after a previous successful connection. These confirmations filter transient errors. With the default 15-second interval, detection takes multiple polls plus ADB/network processing time. A power cut or Wi-Fi failure is reported as **unreachable**, because ADB cannot distinguish those causes.
+
+The Pi must remain powered to monitor, and must have internet access to send Telegram notifications. If the router/internet goes down too, messages are queued and retried when internet returns, subject to the queue limits below. If the Pi loses power, it cannot observe changes while off. Immediate reporting through a shared power or internet outage needs separately powered monitoring and a working backup internet connection.
+
 ## Architecture and delivery behavior
 
 One process owns both TVs and is the only Telegram `getUpdates` consumer. Each cycle checks due TVs, polls commands and attempts one queued outgoing message. Individual ADB calls time out after six seconds and Telegram calls after ten seconds. Checks are sequential: an unreachable TV can delay the other TV and remote commands by multiple ADB timeouts. `POLL_SECONDS` is a minimum spacing after each completed TV observation, not a strict real-time guarantee.
@@ -102,7 +110,7 @@ One process owns both TVs and is the only Telegram `getUpdates` consumer. Each c
 Each TV has independent confirmed power, candidate reading, consecutive count, connectivity and incident state:
 
 - `Awake` maps to ON; `Asleep` maps to OFF/standby. A successful but unrecognized power response maps to UNKNOWN and proves connectivity.
-- Two consecutive matching ON/OFF observations establish or change confirmed power. A failure or UNKNOWN resets the candidate. The first baseline is silent.
+- Two consecutive matching ON/OFF/UNKNOWN observations establish or change confirmed power. Each confirmed change sends an alert; a transport failure resets the candidate. The first baseline is silent.
 - Three consecutive transport failures after a successful connection confirm UNREACHABLE and produce one alert. Further failures are silent. First successful communication produces one recovery alert; a changed power state needs two matching readings separately.
 - Confirmed power and incident flags survive restarts; candidate/failure counters restart at zero. Legacy `tv`, `connectivity`, and `offset` fields are migrated without deleting original fields. Starting offline without previously confirmed connectivity is silent.
 

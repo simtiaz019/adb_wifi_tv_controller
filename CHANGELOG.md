@@ -2,6 +2,10 @@
 
 ## 2026-10-27
 
+- Added alerts for confirmed UNKNOWN power-state transitions and verified independent outage/recovery alerts for both devices without selecting a remote. Documented shared power/internet outage limits.
+
+- Check live ADB connectivity before opening a selected device remote; unreachable devices show an offline message and return to the picker with selection cleared.
+
 - Added a device-first Telegram flow: /home, /menu and /start show the TV picker, selection opens a dedicated remote, and Switch TV returns to the list. Selection persists across restarts.
 
 - Identified the second device as Mi Box 3 and added Android D-pad, OK, Home, Back and play/pause controls for both devices, preserving legacy volume aliases.
