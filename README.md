@@ -64,11 +64,103 @@ The mobile web app keeps the full remote on one screen. Choose or switch devices
 
 The web remote uses a separate process, so Telegram internet timeouts and monitoring checks do not hold up button presses. Per-device locks reject overlapping commands instead of building a delayed queue. Failed key events are never automatically replayed because they may already have taken effect. Reselect a device after a failed command. The two services share the system ADB server and root pairing keys; TV/network/ADB server performance can still affect latency.
 
-The server uses plain HTTP on port 8080 and has no login: anyone on the trusted LAN who can reach that port can control the TVs. Do not port-forward it or expose it to guest/public networks. Bind `WEB_HOST` to the Pi's reserved LAN IPv4 address to restrict its listening interface, and use your firewall to limit access as appropriate. If port 8080 is occupied, change `WEB_PORT`. Host checking supports private IPs, localhost, and the Pi's system hostname/`.local` name. Reverse proxies and custom DNS names are not configured.
+The remote uses plain HTTP on port 8080 and has no login (Live View separately requires credentials): anyone on the trusted LAN who can reach that port can control the TVs. Do not port-forward it or expose it to guest/public networks. Bind `WEB_HOST` to the Pi's reserved LAN IPv4 address to restrict its listening interface, and use your firewall to limit access as appropriate. If port 8080 is occupied, change `WEB_PORT`. Host checking supports private IPs, localhost, and the Pi's system hostname/`.local` name. Reverse proxies and custom DNS names are not configured.
 
 The defaults above also apply if the new web/Telegram-mode settings are absent on upgrade. Telegram controls and notifications stay enabled; the LAN web remote is an additional option. No intermediate version is required.
 
 Configuration is loaded from the process environment; systemd reads `/etc/tv-hub.env`. Running Python directly does not read that file automatically. Names, valid literal IP addresses and comma-separated ports (1–65535) are required for each configured TV. `POLL_SECONDS` defaults to 15 and must be at least 5; `STATE_FILE` defaults to `/var/lib/tv-hub/state.json` and must be absolute. Remove all `TV2_` entries to disable the second device. The web service shares the configuration loader and therefore also requires valid Telegram credential syntax, but never makes Telegram requests or returns those credentials to the browser.
+
+## New: foreground apps and optional Live View
+
+The existing mobile remote and Telegram controls are preserved. The remote now shows the last confirmed app in its header; tap it to open recent activity and delivery history. **📺 Open Live** sits beside Refresh status and opens the selected device's separate Live View page. Back to Remote restores the selected device. The remote still fits one mobile screen; the history dialog and Live View page can scroll when needed.
+
+App monitoring is enabled by default. Two successful observations confirm each package change. The first baseline is silent, movement between activities of one package does not alert, and standby/unreachable observations pause detection. Confirmed app state survives restarts. Notifications use the same Telegram bot/outbox; internet failures retry within existing delivery limits. HDMI Input on the Haier and YouTube on an HDMI-connected Mi Box are independent, expected observations.
+
+### Upgrade this enhancement over an installed TV Hub
+
+Copy the updated repository to the Pi. Back up `/etc/tv-hub.env` and the **active `STATE_FILE`** (it may still be `/var/lib/haier-tv-monitor/state.json` after migration), then run:
+
+```bash
+cd ~/tv-hub
+sudo systemctl stop tv-hub-monitor tv-hub-web
+sudo bash install.sh
+sudo nano /etc/tv-hub.env
+```
+
+The installer preserves the existing environment file. Add/update these settings without duplicating keys:
+
+```ini
+APP_MONITOR_ENABLED=true
+APP_MONITOR_INTERVAL=15
+APP_MONITOR_CONFIRMATIONS=2
+APP_MONITOR_TELEGRAM=true
+TZ=Asia/Dhaka
+TV_APP_MONITOR_ENABLED=true
+TV2_APP_MONITOR_ENABLED=true
+TELEGRAM_REMOTE_ENABLED=1
+```
+
+```bash
+sudo systemctl restart tv-hub-monitor tv-hub-web
+```
+
+No SQL migration or state reset is required: existing JSON gains app state/history on its next atomic save. State, update offsets, configuration and pairing keys remain intact. For an original Haier-package installation, use the direct migration instructions above instead.
+
+### Install optional Live View dependencies
+
+Normal monitoring and remotes do not require scrcpy or FFmpeg. To opt in:
+
+```bash
+cd ~/tv-hub
+sudo bash install-live.sh
+sudo nano /etc/tv-hub.env
+```
+
+Add/update:
+
+```ini
+LIVE_VIEW_ENABLED=true
+LIVE_VIEW_USER=viewer
+# Set your own unique private password, at least 16 characters:
+LIVE_VIEW_PASSWORD="REPLACE_WITH_A_PRIVATE_RANDOM_PASSWORD"
+LIVE_VIEW_MAX_FPS=15
+LIVE_VIEW_MAX_WIDTH=1280
+LIVE_VIEW_BITRATE=2000000
+LIVE_VIEW_IDLE_TIMEOUT=60
+LIVE_VIEW_MAX_CONCURRENT_DEVICES=1
+TV_LIVE_VIEW_ENABLED=false
+TV2_LIVE_VIEW_ENABLED=true
+```
+
+Replace the password placeholder locally, protect the file, and restart:
+
+```bash
+sudo chmod 600 /etc/tv-hub.env
+sudo systemctl restart tv-hub-web
+```
+
+Select Mi Box 3 in the remote, tap Open Live, enter the separate Live View credentials in the browser prompt, and press Start Stream. The page has a responsive 16:9 player, foreground-app label, loading/errors, Stop Stream, Reconnect, and Back to Remote. Capture is on demand; leaving or hiding the page releases the viewer, with a 60-second lease timeout as fallback. Multiple viewers share one capture. Haier's page remains accessible after authentication but explains its disabled/unsupported capture; its normal controls and monitoring still work.
+
+Live View uses authenticated plain HTTP on the trusted LAN, not encrypted transport. Do not port-forward it. Existing LAN remote authentication/access behavior and Telegram authorization are unchanged. See [SECURITY.md](SECURITY.md).
+
+### Dependencies and verification status
+
+The optional bridge uses the actively maintained [Genymobile scrcpy-server **5.0.1**](https://github.com/Genymobile/scrcpy/releases/tag/v5.0.1), pinned to SHA-256 `764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536`. `install-live.sh` verifies the downloaded server before installation. Its architecture-independent Android JAR avoids building the desktop client on the Pi. See upstream [server options](https://github.com/Genymobile/scrcpy/blob/v5.0.1/server/src/main/java/com/genymobile/scrcpy/Options.java) for raw H.264 mode.
+
+FFmpeg is installed from the Pi OS security-maintained package repository, rather than pinning a cross-distribution Debian package version. The bridge requires the H.264 demuxer and fragmented MP4 muxer (`-c:v copy`); intended compatibility is FFmpeg 4.3–9.x, with the automated synthetic integration test run locally on **9.0.2**. Pi package versions remain unverified. No Python or browser packages, desktop GUI, video transcoding or audio stream are added. New runtime support for timezone data comes from `tzdata`.
+
+**Verified here:** mocked app/Telegram transitions, history/restart behavior, HTTP access controls, viewer sharing/expiry and process cleanup; UI event behavior; and real FFmpeg stream-copy producing decodable fragmented MP4 from a synthetic H.264 source. **Not verified:** actual Mi Box capture through this bridge, rendered browser playback/layout, Haier capture, Pi 3B CPU/memory/DNS impact, or on-device systemd deployment. A successful desktop scrcpy test does not prove browser streaming compatibility.
+
+On-device acceptance checklist before treating Live View as operational:
+
+1. Start Mi Box Live View on its launcher; confirm recognizable, changing video frames in a mobile/desktop browser, not just a connection message.
+2. Use Home/volume/navigation in the existing remote while viewing. Check power/app notifications still arrive once per confirmed change.
+3. Open a second viewer of the same device and verify there is one FFmpeg capture pipeline. Stop one viewer, then the last; confirm owned capture/forward resources disappear.
+4. Leave/background the page or disconnect its network; verify capture stops after the idle timeout when there are no other viewers.
+5. Check an ADB disconnection produces an error. Haier should show the disabled/unsupported explanation, with normal remote controls intact.
+6. Measure Pi CPU/memory and AdGuard DNS responsiveness before/during streaming. Keep one stream, 10–15 FPS and 1024–1280 maximum dimension; lower settings or disable Live View if the Pi cannot sustain it.
+
+See [CONFIGURATION.md](CONFIGURATION.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for all settings, lifecycle details, black-screen/codec limitations and diagnostics.
 
 ## Add more TVs or Android boxes
 
@@ -174,10 +266,10 @@ The update offset is saved with the queued command response after executing the 
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q tv_controller.py tv_web.py tests
-bash -n install.sh uninstall.sh
+python3 -m compileall -q tv_controller.py tv_web.py app_activity.py live_view.py tests
+bash -n install.sh install-live.sh uninstall.sh
 # Optional development-only UI checks (requires Node.js on your dev machine):
-node --test tests/web_ui.test.cjs
+node --test tests/*test.cjs
 # Optional staging inspection; no apt/systemd operations:
 bash install.sh --root /tmp/tv-monitor-stage
 ```

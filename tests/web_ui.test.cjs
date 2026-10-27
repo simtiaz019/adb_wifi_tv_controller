@@ -7,17 +7,20 @@ const path = require('node:path');
 function setup() {
   function element() {
     return {textContent: '', value: '', disabled: false, children: [], dataset: {},
+      replaceChildren() { this.children = []; }, showModal() {}, close() {},
       classList: {toggle() {}}, append(child) { this.children.push(child); }};
   }
-  const nodes = Object.fromEntries(['device-select', 'feedback', 'power-state'].map(n => ['#' + n, element()]));
+  const nodes = Object.fromEntries(['device-select', 'feedback', 'power-state', 'open-live', 'activity-link', 'activity-current', 'activity-history', 'activity-dialog', 'close-history'].map(n => ['#' + n, element()]));
   const actions = ['home', 'ok', 'off', 'volup', 'status'].map(action => Object.assign(element(), {dataset: {action}}));
   const calls = [], responses = [];
-  const context = vm.createContext({performance, document: {
+  const navigations = [];
+  const context = vm.createContext({performance, URLSearchParams, setInterval() {}, window: {location: {search: '', assign(url) { navigations.push(url); }}}, document: {
     querySelector: selector => nodes[selector],
     querySelectorAll: () => actions,
     createElement: element
   }, fetch: async (url, options) => {
     calls.push({url, options});
+    if (url.startsWith('/api/activity/')) return {ok: true, json: async () => ({current: {name: 'YouTube'}, available: true, history: []})};
     if (url === '/api/devices') return {ok: true, json: async () => ({csrf: 'test-token', devices: [
       {id: 'main', name: 'Haier TV'}, {id: 'second', name: 'Mi Box 3'}, {id: 'tv3', name: 'Bedroom TV'}]})};
     let result = responses.shift() || {status: 'ON'};
@@ -26,7 +29,7 @@ function setup() {
   }});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8'), context);
   const choose = async id => { nodes['#device-select'].value = id; await nodes['#device-select'].onchange(); };
-  return {nodes, actions, calls, responses, choose};
+  return {nodes, actions, calls, responses, choose, navigations};
 }
 const ready = () => new Promise(resolve => setImmediate(resolve));
 test('dropdown switches devices and targets commands without changing screens', async () => {
@@ -81,4 +84,17 @@ test('pending selection blocks commands and empty selection clears old target', 
   await app.choose('');
   assert.equal(app.nodes['#power-state'].textContent, 'Not connected');
   assert.ok(app.actions.every(button => button.disabled));
+});
+
+test('Open Live retains selected device and app information uses the existing API', async () => {
+  const app = setup(); await ready();
+  assert.equal(app.nodes['#open-live'].disabled, true);
+  await app.choose('second'); await ready();
+  assert.equal(app.nodes['#open-live'].disabled, false);
+  app.nodes['#open-live'].onclick();
+  assert.equal(app.navigations[0], '/live/second');
+  assert.equal(app.nodes['#activity-link'].textContent, 'App: YouTube');
+  await app.choose('main');
+  app.nodes['#open-live'].onclick();
+  assert.equal(app.navigations[1], '/live/main');
 });

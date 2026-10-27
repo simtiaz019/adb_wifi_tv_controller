@@ -8,8 +8,11 @@ set -euo pipefail
 }
 systemctl disable --now tv-hub-monitor tv-hub-web || true
 rm -f /etc/systemd/system/tv-hub-monitor.service /etc/systemd/system/tv-hub-web.service
-rm -f /opt/tv-hub/tv_controller.py /opt/tv-hub/tv_web.py
+rm -f /opt/tv-hub/tv_controller.py /opt/tv-hub/tv_web.py /opt/tv-hub/app_activity.py /opt/tv-hub/live_view.py
 rm -f /opt/tv-hub/web/index.html /opt/tv-hub/web/app.js /opt/tv-hub/web/style.css
+rm -f /opt/tv-hub/web/live.html /opt/tv-hub/web/live.js /opt/tv-hub/web/live.css
+rm -f /opt/tv-hub/vendor/scrcpy-server-v5.0.1
+rmdir /opt/tv-hub/vendor 2>/dev/null || true
 rmdir /opt/tv-hub/web 2>/dev/null || true
 rmdir /opt/tv-hub 2>/dev/null || true
 systemctl daemon-reload

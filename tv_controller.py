@@ -14,7 +14,9 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from app_activity import AppSettings, boolean, foreground, observe_app, notification
 
 LOG = logging.getLogger('tv-monitor')
 KEYS = {'on': 'KEYCODE_WAKEUP', 'off': 'KEYCODE_SLEEP',
@@ -40,6 +42,8 @@ class TV:
     name: str
     ip: str
     ports: tuple
+    app_monitor: bool = True
+    live_view: bool = False
 
     def endpoint(self, port):
         return f'[{self.ip}]:{port}' if ':' in self.ip else f'{self.ip}:{port}'
@@ -53,6 +57,7 @@ class Config:
     state_file: Path
     tvs: list
     telegram_remote: bool = True
+    apps: AppSettings = field(default_factory=AppSettings)
 
     @classmethod
     def load(cls, env=None):
@@ -77,7 +82,7 @@ class Config:
         tvs = []
         numbers = set()
         for key in env:
-            match = re.fullmatch(r'TV([0-9]+)_(NAME|IP|ADB_PORTS)', key)
+            match = re.fullmatch(r'TV([0-9]+)_(NAME|IP|ADB_PORTS|APP_MONITOR_ENABLED|LIVE_VIEW_ENABLED)', key)
             if match:
                 number = int(match.group(1))
                 if number < 2 or str(number) != match.group(1):
@@ -97,14 +102,15 @@ class Config:
                     raise ValueError
             except ValueError:
                 raise ValueError(prefix + 'ADB_PORTS must contain connection ports 1–65535') from None
-            tvs.append(TV(id_, name, ip, ports))
+            tvs.append(TV(id_, name, ip, ports, boolean(env, prefix + 'APP_MONITOR_ENABLED', True),
+                          boolean(env, prefix + 'LIVE_VIEW_ENABLED', False)))
         state_file = Path(env.get('STATE_FILE', '/var/lib/tv-hub/state.json'))
         if not state_file.is_absolute():
             raise ValueError('STATE_FILE must be absolute')
         remote = env.get('TELEGRAM_REMOTE_ENABLED', '1')
         if remote not in ('0', '1'):
             raise ValueError('TELEGRAM_REMOTE_ENABLED must be 0 or 1')
-        return cls(token, chat, interval, state_file, tvs, remote == '1')
+        return cls(token, chat, interval, state_file, tvs, remote == '1', AppSettings.load(env))
 
 
 class Store:
@@ -141,6 +147,10 @@ class Store:
                 'unreachable': self.data.get('connectivity') == 'DOWN'}}
         self.data.setdefault('outbox', [])
         self.data.setdefault('offset', 0)
+        self.data.setdefault('apps', {})
+        self.data.setdefault('app_history', [])
+        if not isinstance(self.data['apps'], dict) or not all(isinstance(v, dict) for v in self.data['apps'].values()) or not isinstance(self.data['app_history'], list) or not all(isinstance(event, dict) for event in self.data['app_history']):
+            raise ValueError('Invalid application state schema')
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -160,11 +170,19 @@ class Store:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def enqueue(self, text, keyboard=None):
+    def history_status(self, item, status):
+        if not item.get('event_id'):
+            return
+        for event in self.data['app_history']:
+            if event.get('id') == item.get('event_id'):
+                event['notification_status'] = status
+
+    def enqueue(self, text, keyboard=None, event_id=None):
         # Bound outage backlog; latest events remain available without replay floods.
         self.data['outbox'].append({'text': text, 'keyboard': keyboard, 'attempts': 0,
-                                    'next': 0, 'created': time.time()})
+                                    'next': 0, 'created': time.time(), 'event_id': event_id})
         if len(self.data['outbox']) > 100:
+            self.history_status(self.data['outbox'][0], 'dropped')
             del self.data['outbox'][0]
             LOG.warning('Outbound queue full; oldest notification discarded')
 
@@ -228,19 +246,31 @@ class ADB:
                 addresses.append(tv.endpoint(int(port)))
         return list(dict.fromkeys(addresses))
 
-    def connect(self, tv):
+    def connect(self, tv, cancelled=lambda: False):
+        if cancelled():
+            return None
         cached = self.cached.pop(tv.id, None)
         if cached and self.reachable(cached):
             self.cached[tv.id] = cached
             return cached
         for addr in self.candidates(tv):
+            if cancelled():
+                return None
             if not self.reachable(addr):
+                if cancelled():
+                    return None
                 self.run('connect', addr)
+                if cancelled():
+                    return None
                 if not self.reachable(addr):
                     continue
             self.cached[tv.id] = addr
             return addr
         return None
+
+    def foreground(self, addr):
+        package = foreground(self.run('-s', addr, 'shell', 'dumpsys', 'activity', 'activities'))
+        return package or foreground(self.run('-s', addr, 'shell', 'dumpsys', 'window', 'windows'), window=True)
 
     def power(self, addr):
         output = self.run('-s', addr, 'shell', 'dumpsys', 'power')
@@ -279,6 +309,10 @@ class App:
         self.tvs = {tv.id: tv for tv in config.tvs}
         self.next_poll = 0
         self.poll_failures = 0
+        self.app_due, self.app_pending, self.readings, self.generations = {}, {}, {}, {}
+        self.app_workers = ThreadPoolExecutor(max_workers=2, thread_name_prefix='app-observer')
+        for state in store.data['apps'].values():
+            state.update(candidate=None, count=0, available=False)
         # Require fresh consecutive observations after restart; retain confirmed facts.
         for state in store.data['tvs'].values():
             state.update(candidate=None, count=0, failures=0)
@@ -365,9 +399,51 @@ class App:
         text, keyboard = self.command(self.tvs[tv_id], action)
         self.store.enqueue(text, keyboard)
 
+    def activity_tick(self):
+        # Only the main thread mutates the shared JSON state/outbox.
+        for tv_id, (future, generation) in list(self.app_pending.items()):
+            if not future.done():
+                continue
+            del self.app_pending[tv_id]
+            try:
+                package = future.result()
+            except Exception:
+                LOG.warning('Foreground observation failed for %s', tv_id)
+                package = None
+            if self.generations.get(tv_id, 0) != generation or self.readings.get(tv_id, (None, None))[1] != 'ON':
+                continue
+            self.record_activity(self.tvs[tv_id], package)
+        if not self.config.apps.enabled:
+            return
+        for tv in self.tvs.values():
+            if len(self.app_pending) >= 2:
+                break
+            addr, reading = self.readings.get(tv.id, (None, None))
+            if not tv.app_monitor or reading != 'ON' or tv.id in self.app_pending or time.monotonic() < self.app_due.get(tv.id, 0):
+                continue
+            self.app_due[tv.id] = time.monotonic() + self.config.apps.interval
+            self.app_pending[tv.id] = (self.app_workers.submit(ADB().foreground, addr), self.generations.get(tv.id, 0))
+
+    def record_activity(self, tv, package):
+        state = self.store.data['apps'].setdefault(tv.id, {})
+        event = observe_app(state, package, tv, self.config.apps)
+        if event:
+            self.store.data['app_history'].append(event)
+            self.store.data['app_history'] = self.store.data['app_history'][-self.config.apps.history_limit:]
+            if self.config.apps.telegram:
+                self.store.enqueue(notification(event, self.config.apps), event_id=event['id'])
+        self.store.save()
+
+    def close(self):
+        self.app_workers.shutdown(wait=True, cancel_futures=True)
+
     def monitor(self, tv):
         addr = self.adb.connect(tv)
         reading = self.adb.power(addr) if addr else None
+        self.readings[tv.id] = (addr, reading)
+        if reading != 'ON':
+            self.generations[tv.id] = self.generations.get(tv.id, 0) + 1
+            self.store.data['apps'].setdefault(tv.id, {}).update(candidate=None, count=0, available=False)
         LOG.info('%s observation: %s', tv.id, reading or 'NO_CONNECTION')
         state = self.store.data['tvs'].setdefault(tv.id, {})
         for alert in observe(state, reading, tv.name):
@@ -402,6 +478,7 @@ class App:
         item = queue[0]
         now = time.time()
         if now - item['created'] > 86400 or item['attempts'] >= 12:
+            self.store.history_status(item, 'expired')
             queue.pop(0)
             LOG.warning('Expired outbound message discarded')
             self.store.save()
@@ -416,8 +493,10 @@ class App:
         except TelegramError:
             item['attempts'] += 1
             item['next'] = now + min(3600, 2 ** item['attempts'])
+            self.store.history_status(item, 'retrying')
             LOG.warning('Outbound message deferred')
         else:
+            self.store.history_status(item, 'sent')
             queue.pop(0)
         self.store.save()
 
@@ -448,6 +527,7 @@ def main():
                     if time.monotonic() >= due[tv.id]:
                         app.monitor(tv)
                         due[tv.id] = time.monotonic() + config.interval
+                    app.activity_tick()
                     app.poll()
                     app.flush()
                 time.sleep(0.5)

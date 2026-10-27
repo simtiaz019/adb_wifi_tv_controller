@@ -14,7 +14,7 @@ if [[ -z $root ]]; then
     [[ -z $owner || $owner == root ]] || { echo "Existing $unit has a different owner; migrate its ADB identity first."; exit 1; }
   done
   apt-get update
-  apt-get install -y adb python3
+  apt-get install -y adb python3 tzdata
   for unit in haier-tv-monitor haier-tv-web tv-hub-monitor tv-hub-web; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
       systemctl stop "$unit"
@@ -27,8 +27,8 @@ if [[ -z $root ]]; then
 fi
 install -d -m 755 "$root/opt/tv-hub/web" "$root/etc/systemd/system"
 install -d -m 700 "$root/var/lib/tv-hub"
-install -m 755 tv_controller.py tv_web.py "$root/opt/tv-hub/"
-install -m 644 web/index.html web/app.js web/style.css "$root/opt/tv-hub/web/"
+install -m 755 tv_controller.py tv_web.py app_activity.py live_view.py "$root/opt/tv-hub/"
+install -m 644 web/index.html web/app.js web/style.css web/live.html web/live.js web/live.css "$root/opt/tv-hub/web/"
 install -m 644 tv-hub-monitor.service tv-hub-web.service "$root/etc/systemd/system/"
 config="$root/etc/tv-hub.env"
 legacy_config="$root/etc/haier-tv-monitor.env"

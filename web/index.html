@@ -2,14 +2,14 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111815"><title>TV Hub</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body><main>
-<header><h1>⌁ TV HUB</h1><span class="local">LAN remote</span></header>
+<header><h1>⌁ TV HUB</h1><button id="activity-link" class="local" title="Show current app and recent activity">App: not observed</button></header>
 <div class="device-bar"><label for="device-select">DEVICE <span id="power-state" role="status">Not connected</span></label><select id="device-select" disabled><option value="">Choose a TV…</option></select></div>
 <section id="remote" aria-label="TV remote">
 <div class="row power"><button data-action="on" disabled>◉ <span>Wake</span></button><button data-action="off" disabled>☾ <span>Sleep</span></button></div>
 <div class="dpad"><button class="up" data-action="navup" aria-label="Up" disabled>↑</button><button class="left" data-action="left" aria-label="Left" disabled>←</button><button class="ok" data-action="ok" disabled>OK</button><button class="right" data-action="right" aria-label="Right" disabled>→</button><button class="down" data-action="navdown" aria-label="Down" disabled>↓</button></div>
 <div class="row navigation"><button data-action="back" disabled>↶ <span>Back</span></button><button data-action="home" disabled>⌂ <span>Home</span></button><button data-action="playpause" disabled>▷ Ⅱ <span>Play / pause</span></button></div>
 <div class="row volume"><button data-action="voldown" aria-label="Volume down" disabled>− <span>Volume</span></button><button data-action="mute" disabled>Mute</button><button data-action="volup" aria-label="Volume up" disabled>+ <span>Volume</span></button></div>
-<button data-action="status" class="refresh" disabled>↻ Refresh status</button>
+<div class="extras"><button data-action="status" class="refresh" disabled>↻ Refresh status</button><button id="open-live" disabled>📺 Open Live</button></div>
 </section>
 <p id="feedback" role="status" aria-live="polite">Connecting to TV Hub…</p>
-</main></body></html>
+</main><dialog id="activity-dialog"><h2>App activity</h2><p id="activity-current"></p><ol id="activity-history"></ol><button id="close-history">Close</button></dialog></body></html>

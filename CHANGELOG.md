@@ -2,6 +2,12 @@
 
 ## 2026-10-27
 
+- Added per-device foreground-package monitoring with Android resumed/focused-activity parsing, configurable labels, two-observation confirmation, silent baselines, standby pausing and persistent restart recovery.
+- Added bounded app transition history and linked notification delivery statuses through the existing Telegram outbox; exposed read-only app/history data in the remote.
+- Added Open Live and a device-specific authenticated Live View page with loading/errors, start/stop/reconnect, current app and retained remote selection.
+- Added an optional hash-pinned scrcpy-server 5.0.1 / FFmpeg stream-copy bridge, shared capture sessions, viewer leases, cleanup and Pi resource limits. No transcoding or protected-content bypass.
+- Added tests and configuration/architecture/troubleshooting guides. Actual TV-to-browser streaming and Pi performance remain unverified.
+
 - Reworked the mobile web remote into one viewport-sized screen with a top device dropdown, persistent controls, and compact landscape layout. Device changes still verify connectivity; offline controls stay disabled.
 
 - Renamed the app to TV Hub, with `tv_controller.py`, `tv-hub-monitor`/`tv-hub-web` services and generic installation paths.

@@ -17,6 +17,11 @@ UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+# Bound optional capture/remux work on shared Raspberry Pi hosts.
+CPUQuota=50%
+MemoryMax=192M
+TasksMax=64
+TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target
