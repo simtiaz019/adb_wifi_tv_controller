@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.env
+!config.env.example
+*.secret
+state.json
+state.json.*
+haier_tv_codex_ready.zip
+.DS_Store

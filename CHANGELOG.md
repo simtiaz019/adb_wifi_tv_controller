@@ -1,0 +1,16 @@
+# Changelog
+
+## 2026-10-27
+
+- Added a device-first Telegram flow: /home, /menu and /start show the TV picker, selection opens a dedicated remote, and Switch TV returns to the list. Selection persists across restarts.
+
+- Identified the second device as Mi Box 3 and added Android D-pad, OK, Home, Back and play/pause controls for both devices, preserving legacy volume aliases.
+
+- Extracted the supplied archive into the repository root and retained the implementation brief.
+- Added a second configurable TV, default example endpoint 192.168.1.149:5555, with named Telegram buttons and explicit TV selectors.
+- Replaced import-time globals with validated configuration and testable ADB, Telegram, persistence and state-machine components.
+- Fixed connectivity initialization, UNKNOWN handling, callback authorization and token-bearing exception logging.
+- Added atomic durable notification retries, update offsets, process locking, legacy-state migration and diagnostics.
+- Added repeatable installation with config/state preservation, staged installer verification and explicit uninstall retention options.
+- Documented upgrade commands, pairing identity, notification/crash tradeoffs and remaining on-device checks.
+- Added mocked standard-library tests; no live hardware or Telegram success is claimed.
