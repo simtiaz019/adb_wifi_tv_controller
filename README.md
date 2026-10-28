@@ -95,6 +95,8 @@ APP_MONITOR_INTERVAL=15
 APP_MONITOR_CONFIRMATIONS=2
 APP_MONITOR_TELEGRAM=true
 TZ=Asia/Dhaka
+CONNECTION_FAILURE_CONFIRMATIONS=5
+CONNECTION_RECOVERY_CONFIRMATIONS=3
 TV_APP_MONITOR_ENABLED=true
 TV2_APP_MONITOR_ENABLED=true
 TELEGRAM_REMOTE_ENABLED=1
@@ -120,9 +122,6 @@ Add/update:
 
 ```ini
 LIVE_VIEW_ENABLED=true
-LIVE_VIEW_USER=viewer
-# Set your own unique private password, at least 16 characters:
-LIVE_VIEW_PASSWORD="REPLACE_WITH_A_PRIVATE_RANDOM_PASSWORD"
 LIVE_VIEW_MAX_FPS=15
 LIVE_VIEW_MAX_WIDTH=1280
 LIVE_VIEW_BITRATE=2000000
@@ -132,16 +131,16 @@ TV_LIVE_VIEW_ENABLED=false
 TV2_LIVE_VIEW_ENABLED=true
 ```
 
-Replace the password placeholder locally, protect the file, and restart:
+Protect the file and restart:
 
 ```bash
 sudo chmod 600 /etc/tv-hub.env
 sudo systemctl restart tv-hub-web
 ```
 
-Select Mi Box 3 in the remote, tap Open Live, enter the separate Live View credentials in the browser prompt, and press Start Stream. The page has a responsive 16:9 player, foreground-app label, loading/errors, Stop Stream, Reconnect, and Back to Remote. Capture is on demand; leaving or hiding the page releases the viewer, with a 60-second lease timeout as fallback. Multiple viewers share one capture. Haier's page remains accessible after authentication but explains its disabled/unsupported capture; its normal controls and monitoring still work.
+Select Mi Box 3 in the remote, tap Open Live, and press Start Stream. There is no username/password prompt. The page has a responsive 16:9 player, foreground-app label, loading/errors, Stop Stream, Reconnect, and Back to Remote. Capture is on demand; leaving or hiding the page releases the viewer, with a 60-second lease timeout as fallback. Multiple viewers share one capture. Haier's page explains its disabled/unsupported capture; its normal controls and monitoring still work.
 
-Live View uses authenticated plain HTTP on the trusted LAN, not encrypted transport. Do not port-forward it. Existing LAN remote authentication/access behavior and Telegram authorization are unchanged. See [SECURITY.md](SECURITY.md).
+Live View uses plain HTTP on the trusted LAN, not encrypted transport. Do not port-forward it. Existing LAN remote access behavior and Telegram authorization are unchanged. See [SECURITY.md](SECURITY.md).
 
 ### Dependencies and verification status
 
@@ -233,7 +232,7 @@ Success means ADB accepted the key event, not that the physical screen or volume
 
 All configured devices are monitored all the time, regardless of which remote you select. You receive named alerts for ON, OFF/standby, confirmed UNKNOWN power state, loss of connectivity, and reconnection. The first observed baseline is silent; repeated identical readings do not generate repeated alerts.
 
-Power states require two matching polls; loss of connectivity requires three failed polls after a previous successful connection. These confirmations filter transient errors. With the default 15-second interval, detection takes multiple polls plus ADB/network processing time. A power cut or Wi-Fi failure is reported as **unreachable**, because ADB cannot distinguish those causes.
+Power states require two matching polls. By default, connectivity alerts require five failed polls after a previous successful connection, and a recovery alert requires three consecutive successful polls. This deliberately filters brief ADB/Wi-Fi sleep flaps common when a Mi Box screen is off. With the default 15-second interval, an outage alert takes roughly 75 seconds plus ADB/network processing time; recovery takes roughly 45 seconds. Change `CONNECTION_FAILURE_CONFIRMATIONS` and `CONNECTION_RECOVERY_CONFIRMATIONS` only if you accept more noise. A power cut or Wi-Fi failure is reported as **unreachable**, because ADB cannot distinguish those causes.
 
 The Pi must remain powered to monitor, and must have internet access to send Telegram notifications. If the router/internet goes down too, messages are queued and retried when internet returns, subject to the queue limits below. If the Pi loses power, it cannot observe changes while off. Immediate reporting through a shared power or internet outage needs separately powered monitoring and a working backup internet connection.
 
@@ -245,7 +244,7 @@ Each TV has independent confirmed power, candidate reading, consecutive count, c
 
 - `Awake` maps to ON; `Asleep` maps to OFF/standby. A successful but unrecognized power response maps to UNKNOWN and proves connectivity.
 - Two consecutive matching ON/OFF/UNKNOWN observations establish or change confirmed power. Each confirmed change sends an alert; a transport failure resets the candidate. The first baseline is silent.
-- Three consecutive transport failures after a successful connection confirm UNREACHABLE and produce one alert. Further failures are silent. First successful communication produces one recovery alert; a changed power state needs two matching readings separately.
+- Five consecutive transport failures after a successful connection confirm UNREACHABLE by default and produce one alert. Further failures are silent. Three consecutive successful polls are required before one recovery alert. These values are configurable with `CONNECTION_FAILURE_CONFIRMATIONS` and `CONNECTION_RECOVERY_CONFIRMATIONS`; they apply independently to every device. A changed power state still needs two matching readings separately.
 - Confirmed power and incident flags survive restarts; candidate/failure counters restart at zero. Legacy `tv`, `connectivity`, and `offset` fields are migrated without deleting original fields. Starting offline without previously confirmed connectivity is silent.
 
 Atomic JSON writes use a private temporary file, fsync and replacement. Transitions and their queued notifications are saved together. The durable queue holds at most 100 messages, with exponential retry delay capped at one hour; messages expire after 12 failed attempts or 24 hours. Overflow drops the oldest message and logs the drop. Delivery is best effort with at-least-once retry semantics within these limits: an ambiguous network failure or crash after Telegram accepts a message can duplicate it. No delivery guarantee exists during extended outages.

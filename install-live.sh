@@ -33,6 +33,6 @@ else:
             os.unlink(name)
     print('Installed verified scrcpy-server v' + version)
 PY
-echo 'Configure LIVE_VIEW_ENABLED, LIVE_VIEW_PASSWORD and device LIVE_VIEW_ENABLED flags in /etc/tv-hub.env.'
+echo 'Configure LIVE_VIEW_ENABLED and device LIVE_VIEW_ENABLED flags in /etc/tv-hub.env.'
 echo 'Then: sudo systemctl restart tv-hub-web'
 echo 'Capture/browser compatibility and Pi performance still require on-device verification.'

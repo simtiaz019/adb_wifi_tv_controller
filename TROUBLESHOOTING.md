@@ -22,13 +22,15 @@ Look for `mResumedActivity:` or `topResumedActivity=`, or focused Window/Activit
 
 No alert on first observation is expected. A change needs two consecutive matching reads; standby, disconnections and unknown observations reset candidates. Defaults require about two polling observations, plus ADB and scheduler time. App checks run only following an awake power reading. Check `APP_MONITOR_ENABLED`, the matching `TVn_APP_MONITOR_ENABLED`, and `APP_MONITOR_TELEGRAM` if history appears without messages. Review the activity dialog for `pending`, `retrying`, `expired` or `dropped` delivery status.
 
+Connectivity alerts intentionally use hysteresis: five failed polls confirm unreachable and three successful polls confirm recovery. This prevents repeated unreachable/restored pairs when a sleeping Mi Box intermittently answers ADB. If alerts still flap, inspect `adb devices` and Wi-Fi power-saving, then raise the two `CONNECTION_*_CONFIRMATIONS` values rather than lowering them.
+
 The Haier HDMI input app describes the TV's input player; it cannot identify which application is running on an attached Mi Box. HDMI Input on Haier and YouTube on Mi Box at the same time is expected.
 
 If the service reports an invalid timezone, install `tzdata` and use `TZ=Asia/Dhaka` or another IANA timezone. Do not delete state to resolve a notification issue; that file contains power/app baselines, update offsets and undelivered messages. Stop the service and back it up before repairs.
 
 ## Live authentication and availability
 
-Opening Live View prompts for `LIVE_VIEW_USER`/`LIVE_VIEW_PASSWORD`, separate from Telegram. A missing/short password yields a configuration error before any capture starts. The page and media APIs require authentication even if the device is opted out. Keep credentials in `/etc/tv-hub.env` with mode 600. Basic authentication over plain HTTP does not encrypt traffic; use only the trusted LAN. Browsers may cache this login until closed.
+Live View no longer prompts for a username/password. It is intentionally LAN-only and uses host validation, CSRF for mutations, device IDs and viewer leases. Anyone who can reach port 8080 can use enabled Live View and the existing remote; keep it off guest/public networks and never port-forward it.
 
 If the page reports disabled or unsupported, check both `LIVE_VIEW_ENABLED` and the selected device's `TVn_LIVE_VIEW_ENABLED`. The Haier opt-out is intentional. If it reports missing dependencies or a checksum mismatch, run `sudo bash install-live.sh` from the updated checkout; do not substitute an arbitrary scrcpy server version. FFmpeg must be visible to the service or configured using an absolute `LIVE_VIEW_FFMPEG` path.
 

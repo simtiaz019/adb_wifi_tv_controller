@@ -35,8 +35,6 @@ Built-in labels: YouTube (`com.google.android.youtube.tv`), Netflix (`com.netfli
 | --- | --- | --- |
 | `LIVE_VIEW_ENABLED` | `false` | Global on-demand streaming switch. Normal monitoring/remotes work without streaming dependencies. |
 | `TV_LIVE_VIEW_ENABLED` | `false` | Per-device opt-in; use the corresponding numbered prefix. |
-| `LIVE_VIEW_USER` | `viewer` | HTTP Basic username for Live View; must be nonempty and contain no colon. |
-| `LIVE_VIEW_PASSWORD` | unset | Required private password, at least 16 characters. Never sent in a frontend API response. |
 | `LIVE_VIEW_MAX_FPS` | `15` | Maximum requested encoder frame rate, 5–30. |
 | `LIVE_VIEW_MAX_WIDTH` | `1280` | Scrcpy maximum **dimension**, 320–1920; landscape is approximately 720p at 1280. |
 | `LIVE_VIEW_BITRATE` | `2000000` | Encoder bits/second, 100000–8000000. |
@@ -58,4 +56,4 @@ TV2_LIVE_VIEW_ENABLED=true
 
 Haier remains opted out because its capture has previously produced black/empty results. The example config uses port 5555 for both devices as confirmed in the latest task. Existing installed port lists are never rewritten. A new device defaults to app observation enabled and Live View disabled.
 
-Live credentials authorize all explicitly live-enabled devices; viewer lease IDs additionally scope stream reads/stops to a requested device. Existing LAN remote access remains unchanged. Live View uses plain HTTP Basic on the trusted LAN by default: it is authentication, **not encryption**. Do not use a reused password, public/guest Wi-Fi, or port forwarding. HTTPS/VPN deployment is separate work.
+Live View intentionally has no username/password prompt. Host validation, the per-process CSRF token for mutating requests, device IDs and viewer leases still apply. Anyone who can reach port 8080 can use enabled Live View and the existing LAN remote. Plain HTTP is not encrypted; keep it on a trusted LAN and do not port-forward it.

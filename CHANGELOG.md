@@ -7,6 +7,7 @@
 - Added Open Live and a device-specific authenticated Live View page with loading/errors, start/stop/reconnect, current app and retained remote selection.
 - Added an optional hash-pinned scrcpy-server 5.0.1 / FFmpeg stream-copy bridge, shared capture sessions, viewer leases, cleanup and Pi resource limits. No transcoding or protected-content bypass.
 - Added tests and configuration/architecture/troubleshooting guides. Actual TV-to-browser streaming and Pi performance remain unverified.
+- Removed the Live View username/password prompt at the user's request; Live View remains LAN-only with CSRF and viewer-lease checks.
 
 - Reworked the mobile web remote into one viewport-sized screen with a top device dropdown, persistent controls, and compact landscape layout. Device changes still verify connectivity; offline controls stay disabled.
 

@@ -35,8 +35,6 @@ class LiveSettings:
     max_devices: int = 1
     max_viewers: int = 4
     startup: int = 30
-    username: str = 'viewer'
-    password: str = ''
     server_path: str = '/opt/tv-hub/vendor/scrcpy-server-v5.0.1'
     ffmpeg: str = 'ffmpeg'
 
@@ -50,14 +48,11 @@ class LiveSettings:
                    integer(env, 'LIVE_VIEW_MAX_CONCURRENT_DEVICES', 1, 1, 2),
                    integer(env, 'LIVE_VIEW_MAX_VIEWERS', 4, 1, 8),
                    integer(env, 'LIVE_VIEW_STARTUP_TIMEOUT', 30, 10, 120),
-                   env.get('LIVE_VIEW_USER', 'viewer'), env.get('LIVE_VIEW_PASSWORD', ''),
                    env.get('LIVE_VIEW_SERVER_PATH', cls.server_path), env.get('LIVE_VIEW_FFMPEG', 'ffmpeg'))
 
     def availability(self):
         if not self.enabled:
             return 'Live View is disabled. Enable LIVE_VIEW_ENABLED in the Pi configuration.'
-        if not self.username or ':' in self.username or len(self.password) < 16:
-            return 'Configure LIVE_VIEW_USER and a LIVE_VIEW_PASSWORD of at least 16 characters.'
         if not shutil.which(self.ffmpeg):
             return 'FFmpeg is missing. Install the optional Live View dependencies.'
         try:
@@ -110,6 +105,7 @@ class Capture:
         self.phase, self.error, self.codec = 'starting', None, None
         self.init = b''
         self.fragments = deque(maxlen=4)
+        self.bootstrap = None
         self.sequence = 0
         self.thread = None
         self.processes = []
@@ -141,18 +137,25 @@ class Capture:
             elif kind == b'mdat':
                 self.sequence += 1
                 self.fragments.append((self.sequence, data))
+                if self.bootstrap is None and self.init:
+                    self.bootstrap = (self.sequence, data)
                 self.phase = 'receiving'  # Transport only; browser verifies decoded frames.
             self.condition.notify_all()
 
     def segment(self, after):
         with self.condition:
-            self.condition.wait_for(lambda: self.sequence > after or self.error or self.done.is_set(), timeout=3)
+            self.condition.wait_for(lambda: (self.sequence > after and self.bootstrap is not None and self.codec) or
+                                    self.error or self.done.is_set(), timeout=3)
             if self.error:
                 return 503, {'error': self.error}
             if self.sequence <= after:
                 return (410, {'error': 'Stream stopped.'}) if self.done.is_set() else (204, None)
-            sequence, data = self.fragments[-1] if after == 0 else next(
-                ((n, b) for n, b in self.fragments if n > after), self.fragments[-1])
+            if after == 0:
+                if self.bootstrap is None:
+                    return 204, None
+                sequence, data = self.bootstrap
+            else:
+                sequence, data = next(((n, b) for n, b in self.fragments if n > after), self.fragments[-1])
             return 200, (sequence, self.codec, (self.init if after == 0 else b'') + data)
 
     def adb(self, *args, timeout=8):

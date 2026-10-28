@@ -36,6 +36,23 @@ class MonitorTests(unittest.TestCase):
             self.assertEqual(observe(s, recovery, 'N'), ['N connection restored.'])
             self.assertEqual(len(observe(s, recovery, 'N')), int(recovery == 'OFF'))
 
+    def test_connectivity_alerts_use_hysteresis(self):
+        state = {}
+        observe(state, 'ON', 'Mi Box 3')
+        observe(state, 'ON', 'Mi Box 3')
+        for _ in range(4):
+            self.assertEqual(observe(state, None, 'Mi Box 3', 5, 3), [])
+        self.assertIn('unreachable', observe(state, None, 'Mi Box 3', 5, 3)[0])
+        self.assertEqual(observe(state, 'ON', 'Mi Box 3', 5, 3), [])
+        self.assertEqual(observe(state, 'ON', 'Mi Box 3', 5, 3), [])
+        self.assertEqual(observe(state, 'ON', 'Mi Box 3', 5, 3), ['Mi Box 3 connection restored.'])
+
+    def test_config_defaults_and_validation_for_hysteresis(self):
+        self.assertEqual(Config.load(ENV).connection_failures, 5)
+        self.assertEqual(Config.load(ENV).connection_recoveries, 3)
+        with self.assertRaises(ValueError):
+            Config.load(dict(ENV, CONNECTION_FAILURE_CONFIRMATIONS='2'))
+
     def test_every_confirmed_power_change(self):
         state = {}
         for reading in ('ON', 'ON'):
@@ -200,12 +217,15 @@ class AppTests(unittest.TestCase):
         self.path.write_text(json.dumps({'tv': 'ON', 'connectivity': 'DOWN', 'offset': 42}))
         store = Store(self.path)
         app = App(self.config, store, self.adb, self.telegram)
-        app.monitor(self.config.tvs[0]); app.monitor(self.config.tvs[0])
-        app.monitor(self.config.tvs[1]); app.monitor(self.config.tvs[1])
+        for _ in range(3):
+            app.monitor(self.config.tvs[0])
+        for _ in range(3):
+            app.monitor(self.config.tvs[1])
         self.assertEqual(len(store.data['outbox']), 1)
         self.assertEqual(store.data['offset'], 42)
         restarted = App(self.config, Store(self.path), self.adb, self.telegram)
-        restarted.monitor(self.config.tvs[0])
+        for _ in range(3):
+            restarted.monitor(self.config.tvs[0])
         self.assertEqual(len(restarted.store.data['outbox']), 1)
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
@@ -241,7 +261,7 @@ class AppTests(unittest.TestCase):
             self.app.monitor(tv)
         self.assertEqual(self.app.store.data['outbox'], [])
         self.adb.connect.return_value = None
-        for _ in range(4):
+        for _ in range(5):
             for tv in self.config.tvs:
                 self.app.monitor(tv)
         messages = [item['text'] for item in Store(self.path).data['outbox']]
@@ -257,12 +277,15 @@ class AppTests(unittest.TestCase):
         for _ in range(3):
             for tv in self.config.tvs:
                 restarted.monitor(tv)
-        self.assertEqual(len(Store(self.path).data['outbox']), 6)
+        self.assertEqual(len(Store(self.path).data['outbox']), 4)
         again = App(self.config, Store(self.path), self.adb, self.telegram)
+        before_messages = [item['text'] for item in again.store.data['outbox']]
         for _ in range(2):
             for tv in self.config.tvs:
                 again.monitor(tv)
-        self.assertEqual(len(again.store.data['outbox']), 6)
+        after_messages = [item['text'] for item in again.store.data['outbox']]
+        self.assertEqual(sum('unreachable' in item or 'connection restored' in item for item in after_messages),
+                         sum('unreachable' in item or 'connection restored' in item for item in before_messages))
 
     def test_invalid_state_schema(self):
         for data in ({'tvs': {'main': []}}, {'outbox': [{}]}, {'offset': -1}):

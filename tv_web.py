@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Trusted-LAN remote, independent from the Telegram monitoring process."""
 from datetime import datetime, timezone
-import base64
-import binascii
 import ipaddress
 import json
 import logging
@@ -125,20 +123,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def live_auth(self):
-        settings = self.server.live.settings
-        if not settings.username or len(settings.password) < 16:
-            self.respond(503, {'error': 'Live View requires LIVE_VIEW_USER and LIVE_VIEW_PASSWORD (at least 16 characters) in the Pi configuration.'})
-            return False
-        try:
-            scheme, encoded = self.headers.get('Authorization', '').split(' ', 1)
-            supplied = base64.b64decode(encoded, validate=True)
-            expected = (settings.username + ':' + settings.password).encode()
-            valid = scheme.lower() == 'basic' and secrets.compare_digest(supplied, expected)
-        except (ValueError, binascii.Error):
-            valid = False
-        if not valid:
-            self.respond(401, {'error': 'Live View authentication required.'}, headers={'WWW-Authenticate': 'Basic realm="TV Hub Live", charset="UTF-8"'})
-        return valid
+        # Live View is intentionally LAN-only without a user/password prompt.
+        # Host validation plus the existing per-process CSRF token still applies
+        # to mutating requests; do not expose this service beyond the LAN.
+        return True
 
     def do_GET(self):
         if not self.valid_host():

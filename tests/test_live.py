@@ -32,7 +32,7 @@ class FakeCapture(Capture):
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.tvs = [replace(tv, live_view=True) for tv in Config.load(ENV).tvs]
-        self.settings = LiveSettings(enabled=True, password='private-test-password')
+        self.settings = LiveSettings(enabled=True)
         self.settings.availability = Mock(return_value=None)
         self.factory = Mock(side_effect=FakeCapture)
         self.manager = LiveManager(self.tvs, self.settings, self.factory)
@@ -78,7 +78,7 @@ class LifecycleTests(unittest.TestCase):
             capture.publish(b'mdat', b'fragment')
         self.assertEqual(len(capture.fragments), 4)
         code, (seq, codec, data) = capture.segment(0)
-        self.assertEqual((code, seq, codec), (200, 10, 'avc1.42e01f'))
+        self.assertEqual((code, seq, codec), (200, 1, 'avc1.42e01f'))
         self.assertTrue(data.startswith(b'ftyp'))
 
     def test_capture_worker_cleans_processes_forward_and_temporary_file(self):
@@ -113,8 +113,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_missing_optional_dependencies_do_not_enable_capture(self):
         self.assertIn('disabled', LiveSettings().availability())
-        self.assertIn('Configure', LiveSettings(enabled=True).availability())
-        self.assertIn('missing', LiveSettings(enabled=True, password='private-test-password', ffmpeg='/missing/ffmpeg').availability())
+        self.assertIn('missing', LiveSettings(enabled=True, ffmpeg='/missing/ffmpeg').availability())
         with self.assertRaises(ValueError):
             LiveSettings.load({'LIVE_VIEW_MAX_FPS': '1000'})
 
@@ -124,7 +123,7 @@ class LiveHTTPTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = Config.load(dict(ENV, STATE_FILE=str(Path(self.temp.name) / 'state.json'), TV2_LIVE_VIEW_ENABLED='true'))
-        self.settings = LiveSettings(enabled=True, password='private-test-password')
+        self.settings = LiveSettings(enabled=True)
         self.settings.availability = Mock(return_value=None)
         self.server = Server(('127.0.0.1', 0), Remote(self.config.tvs), self.config, self.settings)
         self.server.live.factory = FakeCapture
@@ -138,8 +137,6 @@ class LiveHTTPTests(unittest.TestCase):
     def request(self, path, body=None, auth=True, csrf=True):
         connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
         headers = {'Content-Type': 'application/json'}
-        if auth:
-            headers['Authorization'] = 'Basic ' + base64.b64encode(b'viewer:private-test-password').decode()
         if csrf:
             headers['X-Remote-Token'] = self.server.csrf
         connection.request('POST' if body is not None else 'GET', path, json.dumps(body) if body is not None else None, headers)
@@ -149,9 +146,6 @@ class LiveHTTPTests(unittest.TestCase):
         return result
 
     def test_live_auth_page_device_and_csrf(self):
-        self.assertEqual(self.request('/live/second', auth=False)[0], 401)
-        self.assertEqual(self.request('/api/live/second/info', auth=False)[0], 401)
-        self.assertEqual(self.request('/api/live/second/start', {}, auth=False)[0], 401)
         self.assertEqual(self.request('/api/live/second/start', {}, csrf=False)[0], 403)
         self.assertEqual(self.request('/live/second')[0], 200)
         self.assertEqual(self.request('/live/not-configured')[0], 404)
@@ -165,7 +159,7 @@ class LiveHTTPTests(unittest.TestCase):
     def test_media_requires_auth_and_lease_and_stop_releases(self):
         info = json.loads(self.request('/api/live/second/start', {})[1])
         viewer = info['viewer']
-        self.assertEqual(self.request('/api/live/second/media?viewer=' + viewer, auth=False)[0], 401)
+        self.assertEqual(self.request('/api/live/second/media?viewer=invalid', auth=False)[0], 410)
         self.assertEqual(self.request('/api/live/second/media?viewer=invalid')[0], 410)
         session = self.server.live.sessions['second']
         session.init, session.codec = b'init', 'avc1.42e01f'

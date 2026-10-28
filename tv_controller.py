@@ -58,6 +58,8 @@ class Config:
     tvs: list
     telegram_remote: bool = True
     apps: AppSettings = field(default_factory=AppSettings)
+    connection_failures: int = 5
+    connection_recoveries: int = 3
 
     @classmethod
     def load(cls, env=None):
@@ -110,7 +112,15 @@ class Config:
         remote = env.get('TELEGRAM_REMOTE_ENABLED', '1')
         if remote not in ('0', '1'):
             raise ValueError('TELEGRAM_REMOTE_ENABLED must be 0 or 1')
-        return cls(token, chat, interval, state_file, tvs, remote == '1', AppSettings.load(env))
+        try:
+            connection_failures = int(env.get('CONNECTION_FAILURE_CONFIRMATIONS', '5'))
+            connection_recoveries = int(env.get('CONNECTION_RECOVERY_CONFIRMATIONS', '3'))
+            if not 3 <= connection_failures <= 20 or not 2 <= connection_recoveries <= 10:
+                raise ValueError
+        except ValueError:
+            raise ValueError('CONNECTION_FAILURE_CONFIRMATIONS must be 3–20 and CONNECTION_RECOVERY_CONFIRMATIONS 2–10') from None
+        return cls(token, chat, interval, state_file, tvs, remote == '1', AppSettings.load(env),
+                   connection_failures, connection_recoveries)
 
 
 class Store:
@@ -187,21 +197,27 @@ class Store:
             LOG.warning('Outbound queue full; oldest notification discarded')
 
 
-def observe(state, reading, name):
+def observe(state, reading, name, failure_threshold=3, recovery_threshold=1):
     """None means transport failure; UNKNOWN means a live but unrecognized power state."""
     alerts = []
     if reading is None:
         state['candidate'], state['count'] = None, 0
         state['failures'] = state.get('failures', 0) + 1
-        if state['failures'] >= 3 and state.get('connected') and not state.get('unreachable'):
+        state['recoveries'] = 0
+        if state['failures'] >= failure_threshold and state.get('connected') and not state.get('unreachable'):
             state['unreachable'] = True
             alerts.append(f'{name} unreachable: possible power, Wi-Fi, or ADB interruption.')
         state['status'] = 'UNREACHABLE' if state.get('unreachable') else 'UNKNOWN'
         return alerts
     state['failures'] = 0
     if state.get('unreachable'):
+        state['recoveries'] = state.get('recoveries', 0) + 1
+        if state['recoveries'] < recovery_threshold:
+            state['status'] = 'UNKNOWN'
+            return alerts
         alerts.append(f'{name} connection restored.')
     state['connected'], state['unreachable'] = True, False
+    state['recoveries'] = 0
     state['status'] = reading
     state['count'] = state.get('count', 0) + 1 if state.get('candidate') == reading else 1
     state['candidate'] = reading
@@ -446,7 +462,8 @@ class App:
             self.store.data['apps'].setdefault(tv.id, {}).update(candidate=None, count=0, available=False)
         LOG.info('%s observation: %s', tv.id, reading or 'NO_CONNECTION')
         state = self.store.data['tvs'].setdefault(tv.id, {})
-        for alert in observe(state, reading, tv.name):
+        for alert in observe(state, reading, tv.name, self.config.connection_failures,
+                             self.config.connection_recoveries):
             self.store.enqueue(alert)
         self.store.save()  # Alert and transition committed together.
 
