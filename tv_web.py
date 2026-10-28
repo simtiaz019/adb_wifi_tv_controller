@@ -166,7 +166,9 @@ class Handler(BaseHTTPRequestHandler):
                 code, result = session.segment(after)
                 if code == 200:
                     sequence, codec, data = result
-                    return self.respond(200, data, 'video/mp4', {'X-Sequence': sequence, 'X-Video-Codec': codec})
+                    return self.respond(200, data, 'video/mp4', {'X-Sequence': sequence,
+                                                                 'X-Video-Codec': codec or '',
+                                                                 'X-Stream-Bytes': len(data)})
                 if code == 204:
                     return self.respond(204, b'', 'video/mp4')
                 return self.respond(code, result)

@@ -42,7 +42,10 @@ async function start() {
     const data = await command('start');
     if (run !== generation) { await command('stop', {viewer: data.viewer}, true); return; }
     viewer = data.viewer; controller = new AbortController();
-    media = new Media(); objectURL = URL.createObjectURL(media); video.src = objectURL;
+    media = new Media();
+    objectURL = URL.createObjectURL(media);
+    video.src = objectURL;
+    video.load();
     await new Promise((resolve, reject) => { media.addEventListener('sourceopen', resolve, {once:true}); setTimeout(() => reject(new Error('Video player could not open.')), 10000); });
     if (run !== generation) return;
     let after = 0, buffer = null;
@@ -52,8 +55,10 @@ async function start() {
       if (response.status === 204) continue;
       if (!response.ok) { const failure = await response.json(); throw new Error(failure.error || 'Stream ended.'); }
       if (!buffer) {
-        const mime = `video/mp4; codecs="${response.headers.get('X-Video-Codec')}"`;
-        if (!Media.isTypeSupported(mime)) throw new Error('This device’s H.264 profile is unsupported by your browser.');
+        const codec = response.headers.get('X-Video-Codec');
+        if (!codec) throw new Error('The capture did not provide an H.264 codec description.');
+        const mime = `video/mp4; codecs="${codec}"`;
+        if (!Media.isTypeSupported(mime)) throw new Error(`This browser cannot decode ${mime}. Try Safari on iOS 17+ or Chrome/Firefox on a desktop.`);
         buffer = media.addSourceBuffer(mime);
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
